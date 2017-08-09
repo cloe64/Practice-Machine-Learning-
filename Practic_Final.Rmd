@@ -1,0 +1,124 @@
+---
+title: "Final Project"
+author: "Wen Che"
+date: "July 28, 2017"
+output: html_document
+---
+
+```{r setup, echo=FALSE,message = FALSE,warning=FALSE}
+library(knitr)
+opts_chunk$set(echo = TRUE,reindent.spaces = 2,cache=TRUE,fig.width=4.5,fig.height=3.5)
+```
+
+#Final Project Report: Practical Machine Learning
+##Introduction
+
+###Background 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+###Data
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+###Goal
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+##Data Load and Cleaning
+```{r package,message = FALSE,warning=FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)  
+library(randomForest)
+library(corrplot)
+```
+
+```{r loaddata}
+urltrain<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+urltest<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+train <- read.csv(url(urltrain), na.strings=c("NA","#DIV/0!",""))
+valid <- read.csv(url(urltest), na.strings=c("NA","#DIV/0!",""))
+set.seed(12345)
+inTrain<-createDataPartition(train$classe,p=0.7,list=FALSE)
+training<-train[inTrain,]
+testing<-train[-inTrain,]
+dim(training)
+dim(testing)
+```
+
+###Cleaning the data
+
+There are 160 variables in the datasets. 1. Using Near Zero variance removed variables that contain one or few unique values or large ratio of most frequence common value to second frequence common value. 2. Remove the predictors which have percentage of missing values larger than 95%.3.Remove the time variables and row index (1-4).
+```{r clean}
+dataNZV<-nearZeroVar(training)
+training<-training[,-dataNZV]
+testing<-testing[,-dataNZV]
+valid<-valid[,-dataNZV]
+NAmost<-apply(training,2,function(x) mean(is.na(x))>0.95)
+training<-training[,NAmost==FALSE]
+testing<-testing[,NAmost==FALSE]
+valid<-valid[,NAmost==FALSE]
+training<-training[,-c(1,2,3,4)]
+testing<-testing[,-c(1,2,3,4)]
+valid<-valid[,-c(1,2,3,4)]
+dim(training)
+dim(testing)
+dim(valid)
+```
+Investigate the correlations among the predictors.There are 34 percentage of predictors correlated. No need to consider PCA in the preprocess of the data.
+```{r correlate}
+index<-grep('classe',names(training))
+tdata<-training[,-index]
+number<-sapply(tdata,is.numeric)
+Cordata<-tdata[,number]
+Matrix<-abs(cor(Cordata))
+diag(Matrix)<-0
+length(which(Matrix>0.8))/2/55
+```
+##Model Building
+For this project frist repeated k-fold cross-validation for basic parameter tunining. There3 differnt model algorithms and then choose the one with the best out-of-sample accuracy. The three model types to test are:
+
+1.Decision trees with CART (rpart)
+2.gradient boosting trees (gbm)
+3.Random forest decision trees (rf)
+```{r model, results='hide',message=FALSE}
+fitControl <- trainControl(## 10-fold CV
+                           method = "repeatedcv",
+                           number = 3,
+                           ## repeated ten times
+                           repeats = 10)
+dtreeFit <- train(classe~ ., data = training, 
+                 method = "rpart", 
+                 trControl = fitControl)
+gbmFit <- train(classe~ ., data = training, 
+                 method = "gbm", 
+                 trControl = fitControl)
+rfFit <- train(classe~ ., data = training, 
+                 method = "rf", 
+                 trControl = fitControl,
+                 ntree=100)
+```
+##Model Accuracy
+Compare the models accuracy by using testing datasets.
+```{r predict}
+pred_dt<-predict(dtreeFit,testing)
+dt<-confusionMatrix(pred_dt,testing$classe)
+pred_gbm<-predict(gbmFit,testing)
+gbm<-confusionMatrix(pred_gbm,testing$classe)
+pred_rf<-predict(rfFit,testing)
+rf<-confusionMatrix(pred_rf,testing$classe)
+results <- data.frame(
+  Model = c('Decisiontrees', 'GBM', 'RF'),
+  Accuracy = rbind(dt$overall[1], gbm$overall[1], rf$overall[1])
+)
+print(results)
+```
+Based on the assessements of the three models, the gradient boosting and random forests have the high accuracy. The following 5 features are most important from random forests.
+```{r random}
+varImp(rfFit)
+```
+
+
+```{r test}
+predictTEST <- predict(rfFit, newdata=valid)
+predictTEST
+```
